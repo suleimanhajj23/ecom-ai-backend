@@ -14,17 +14,16 @@ from utils import baseline_generate
 
 # --- Setup ---
 Base.metadata.create_all(bind=engine)
-
-app = FastAPI(title="Ecom Copy AI", version="0.6.0")
-
 origins = [
     "https://ecomaicopy.netlify.app",  # ✅ your Netlify frontend
     "http://localhost:8000",           # optional local testing
 ]
 
+app = FastAPI(title="Ecom Copy AI", version="0.6.0")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,   # 👈 not ["*"] if using allow_credentials
+    allow_origins=["https://ecomaicopy.netlify.app"],   # 👈 not ["*"] if using allow_credentials
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
