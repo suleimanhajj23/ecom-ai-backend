@@ -17,9 +17,15 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Ecom Copy AI", version="0.6.0")
 
+origins = [
+    "https://ecomaicopy.netlify.app",  # your frontend
+    "http://localhost:5173",           # if testing locally (vite/react/etc.)
+    "http://127.0.0.1:5500"            # if opening index.html directly
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to your frontend domain
+    allow_origins=origins,  # In production, restrict to your frontend domain
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
