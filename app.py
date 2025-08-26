@@ -23,7 +23,7 @@ app = FastAPI(title="Ecom Copy AI", version="0.6.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ecomaicopy.netlify.app"],   # 👈 not ["*"] if using allow_credentials
+    allow_origins=["*"],   # 👈 not ["*"] if using allow_credentials
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
