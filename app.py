@@ -198,3 +198,10 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             print(f"❌ Downgraded {email} to basic (subscription cancelled)")
 
     return {"status": "success"}
+
+# --- Entry Point for Local & Render ---
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 8000))  # Render provides PORT
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
