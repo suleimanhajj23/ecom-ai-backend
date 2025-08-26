@@ -86,8 +86,19 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 @app.get("/me", response_model=UserOut)
-def read_me(current_user: UserOut = Depends(get_current_user)):
-    return current_user
+def read_me(current_user: User = Depends(get_current_user)):
+    # Calculate free trial remaining (only for basic users)
+    free_trial_remaining = 0
+    if current_user.plan == "basic":
+        free_trial_remaining = max(0, 3 - current_user.monthly_generates)
+
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "plan": current_user.plan,
+        "monthly_generates": current_user.monthly_generates,
+        "free_trial_remaining": free_trial_remaining
+    }
 
 # --- Generate Copy ---
 @app.post("/generate", response_model=GenerateOut)
@@ -98,20 +109,36 @@ async def generate_copy(
 ):
     rules = PLAN_RULES[current_user.plan]
 
-    if rules["max_generates"] is not None and current_user.monthly_generates >= rules["max_generates"]:
-        raise HTTPException(status_code=403, detail="Monthly limit reached. Upgrade your plan.")
+    # --- Free trial for basic users ---
+    if current_user.plan == "basic" and current_user.monthly_generates < 3:
+        # Give them all features during trial
+        include = body.include or ALL_CHANNELS
+    else:
+        # Normal feature restrictions
+        include = body.include or ALL_CHANNELS
+        for ch in include:
+            if ch not in rules["features"]:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"{ch} not available on {current_user.plan} plan"
+                )
 
-    include = body.include or ALL_CHANNELS
-    for ch in include:
-        if ch not in rules["features"]:
-            raise HTTPException(status_code=403, detail=f"{ch} not available on {current_user.plan} plan")
+        # Enforce monthly generate limits (if not unlimited)
+        if rules["max_generates"] is not None and current_user.monthly_generates >= rules["max_generates"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Monthly limit reached. Upgrade your plan."
+            )
 
+    # --- Generate content (baseline for now) ---
     result = baseline_generate(body.product_name.strip(), voice=body.voice)
     out = GenerateOut(**result)
 
+    # --- Save generation ---
     create_generation(db, body.product_name, body.voice, include, out.dict())
     current_user.monthly_generates += 1
     db.commit()
+
     return out
 
 @app.get("/history")
@@ -144,7 +171,7 @@ def generate_email(
 # --- Stripe Checkout (simplified example) ---
 @app.post("/create-checkout-session")
 def create_checkout_session(plan: str, current_user: User = Depends(get_current_user)):
-    if plan not in ["pro", "premium"]:
+    if plan not in ["basic", "pro", "premium"]:
         raise HTTPException(status_code=400, detail="Invalid plan")
 
     try:
