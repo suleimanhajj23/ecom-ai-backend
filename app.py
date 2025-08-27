@@ -11,6 +11,7 @@ from auth import create_access_token, decode_access_token
 from database import SessionLocal, engine, Base
 from models import User, Generation
 from utils import baseline_generate
+from datetime import datetime
 
 # --- Setup ---
 Base.metadata.create_all(bind=engine)
@@ -207,13 +208,14 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         email = session.get("customer_email")
-        plan = "pro" if "pro" in session["metadata"]["plan"] else "premium"
+        plan = session["metadata"].get("plan", "basic")  # fallback to basic if missing
 
         user = db.query(User).filter(User.email == email).first()
         if user:
             user.plan = plan
+            user.monthly_generates = 0  # ✅ reset counter on successful upgrade
             db.commit()
-            print(f"✅ Upgraded {email} to {plan}")
+            print(f"✅ Upgraded {email} to {plan} and reset monthly_generates")
 
     elif event["type"] == "customer.subscription.deleted":
         subscription = event["data"]["object"]
@@ -221,6 +223,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         user = db.query(User).filter(User.email == email).first()
         if user:
             user.plan = "basic"
+            user.monthly_generates = 0  # reset when downgraded too
             db.commit()
             print(f"❌ Downgraded {email} to basic (subscription cancelled)")
 
@@ -232,3 +235,12 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 8000))  # Render provides PORT
     uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
+
+app.post("/reset")
+def reset_users(db: Session = Depends(get_db)):
+    users = db.query(User).all()
+    for user in users:
+        user.monthly_generates = 0
+        user.last_reset = datetime.utcnow()
+    db.commit()
+    return {"status": "✅ All users reset for the month"}
