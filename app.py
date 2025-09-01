@@ -1,6 +1,6 @@
 import os
 import stripe
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -8,10 +8,11 @@ from sqlalchemy.orm import Session
 from schemas import GenerateIn, GenerateOut, UserCreate, UserLogin, UserOut
 from crud import create_user, get_user_by_email, authenticate_user, create_generation, get_generations
 from auth import create_access_token, decode_access_token
-from database import SessionLocal, engine, Base
+from database import SessionLocal, engine, Base, get_db
 from models import User, Generation
 from utils import baseline_generate
 from datetime import datetime
+from auth import create_access_token
 
 # --- Setup ---
 Base.metadata.create_all(bind=engine)
@@ -24,8 +25,8 @@ app = FastAPI(title="Ecom Copy AI", version="0.6.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # 👈 not ["*"] if using allow_credentials
-    allow_credentials=True,
+    allow_origins=["https://ecomaicopy.netlify.app"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -86,19 +87,30 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
-@app.get("/me", response_model=UserOut)
+@app.get("/me")
 def read_me(current_user: User = Depends(get_current_user)):
-    # Calculate free trial remaining (only for basic users)
-    free_trial_remaining = 0
+    # Default voices available to all plans
+    voices_basic = ["default"]
+    voices_pro = ["default", "luxury", "playful", "minimal", "trendy", "formal", "persuasive"]
+
+    # Decide allowed voices based on plan
     if current_user.plan == "basic":
-        free_trial_remaining = max(0, 3 - current_user.monthly_generates)
+        allowed_voices = voices_basic
+    elif current_user.plan == "pro":
+        allowed_voices = voices_pro
+    elif current_user.plan == "premium":
+        # Premium can use presets + custom
+        allowed_voices = voices_pro + ["custom"]
+    else:
+        allowed_voices = voices_basic  # fallback
 
     return {
         "id": current_user.id,
         "email": current_user.email,
         "plan": current_user.plan,
         "monthly_generates": current_user.monthly_generates,
-        "free_trial_remaining": free_trial_remaining
+        "free_trial_remaining": max(0, 3 - current_user.monthly_generates) if current_user.plan == "basic" else None,
+        "allowed_voices": allowed_voices,
     }
 
 # --- Generate Copy ---
@@ -108,14 +120,24 @@ async def generate_copy(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    rules = PLAN_RULES[current_user.plan]
+    # --- Free trial logic (no plan yet) ---
+    if current_user.plan == "free":
+        if current_user.monthly_generates >= 3:
+            raise HTTPException(
+                status_code=403,
+                detail="Free trial limit reached. Please sign up or upgrade to continue."
+            )
 
-    # --- Free trial for basic users ---
-    if current_user.plan == "basic" and current_user.monthly_generates < 3:
-        # Give them all features during trial
-        include = body.include or ALL_CHANNELS
+    # --- Paid plan logic ---
     else:
-        # Normal feature restrictions
+        rules = PLAN_RULES[current_user.plan]
+        if rules["max_generates"] is not None and current_user.monthly_generates >= rules["max_generates"]:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Monthly limit reached for {current_user.plan} plan. Please upgrade to continue."
+            )
+
+        # Check feature availability
         include = body.include or ALL_CHANNELS
         for ch in include:
             if ch not in rules["features"]:
@@ -124,27 +146,18 @@ async def generate_copy(
                     detail=f"{ch} not available on {current_user.plan} plan"
                 )
 
-        # Enforce monthly generate limits (if not unlimited)
-        if rules["max_generates"] is not None and current_user.monthly_generates >= rules["max_generates"]:
-            raise HTTPException(
-                status_code=403,
-                detail="Monthly limit reached. Upgrade your plan."
-            )
-
-    # --- Generate content (baseline for now) ---
+    # --- Generate using AI ---
     result = baseline_generate(body.product_name.strip(), voice=body.voice)
     out = GenerateOut(**result)
 
-    # --- Save generation ---
+    # --- Save Generation ---
     create_generation(db, body.product_name, body.voice, include, out.dict())
+
+    # --- Increment counter ---
     current_user.monthly_generates += 1
     db.commit()
 
     return out
-
-@app.get("/history")
-def read_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return get_generations(db)
 
 # --- Premium Email Generator ---
 @app.post("/generate_email")
@@ -169,6 +182,18 @@ def generate_email(
 
     return {"subject": subject, "body": body}
 
+# --- Billing Portal ---
+@app.post("/billing-portal")
+def create_billing_portal(current_user: User = Depends(get_current_user)):
+    try:
+        session = stripe.billing_portal.Session.create(
+            customer=current_user.stripe_customer_id,
+            return_url="https://ecomaicopy.netlify.app/"
+        )
+        return {"url": session.url}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 # --- Stripe Checkout (simplified example) ---
 @app.post("/create-checkout-session")
 def create_checkout_session(plan: str, current_user: User = Depends(get_current_user)):
@@ -185,8 +210,8 @@ def create_checkout_session(plan: str, current_user: User = Depends(get_current_
             mode="subscription",
             customer_email=current_user.email,
             metadata={"plan": plan},
-            success_url="https://your-frontend.netlify.app?success=true",
-            cancel_url="https://your-frontend.netlify.app?canceled=true",
+            success_url="https://ecomaicopy.netlify.app?success=true",
+            cancel_url="https://ecomaicopy.netlify.app?canceled=true",
         )
         return {"url": session.url}
     except Exception as e:
@@ -237,7 +262,14 @@ if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
 
 app.post("/reset")
-def reset_users(db: Session = Depends(get_db)):
+def reset_users(
+    x_api_key: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    secret = os.getenv("RESET_SECRET")
+    if x_api_key != secret:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     users = db.query(User).all()
     for user in users:
         user.monthly_generates = 0

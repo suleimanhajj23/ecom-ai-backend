@@ -1,21 +1,31 @@
 from sqlalchemy.orm import Session
 from models import User, Generation
 from auth import hash_password, verify_password
+from utils import get_password_hash, verify_password
 
 # ----- Users -----
-def create_user(db: Session, email: str, password: str):
-    user = User(email=email, password_hash=hash_password(password))
-    db.add(user)
+def create_user(db, email: str, password: str):
+    hashed_password = get_password_hash(password)
+    new_user = User(
+        email=email,
+        password_hash=hashed_password,
+        plan="free",                 # ✅ Start all new users on free plan
+        monthly_generates=0,         # start at 0
+        free_trial_remaining=3       # ✅ Give them 3 free trial generates
+    )
+    db.add(new_user)
     db.commit()
-    db.refresh(user)
-    return user
+    db.refresh(new_user)
+    return new_user
 
 def get_user_by_email(db: Session, email: str):
     return db.query(User).filter(User.email == email).first()
 
-def authenticate_user(db: Session, email: str, password: str):
-    user = get_user_by_email(db, email)
-    if not user or not verify_password(password, user.password_hash):
+def authenticate_user(db, email: str, password: str):
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        return None
+    if not verify_password(password, user.password_hash):
         return None
     return user
 

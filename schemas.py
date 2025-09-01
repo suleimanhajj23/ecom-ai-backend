@@ -7,7 +7,7 @@ class UserCreate(BaseModel):
     password: str
 
 class UserLogin(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 class UserOut(BaseModel):
@@ -21,8 +21,7 @@ class UserOut(BaseModel):
 # ----- Copy Generation -----
 class GenerateIn(BaseModel):
     product_name: constr(strip_whitespace=True, min_length=2)
-    voice: Literal["default", "minimal", "playful", "luxury"] = "default"
-    include: Optional[List[str]] = None
+    voice: Optional[str] = "default"  # allow free text for premium users
 
 class GenerateOut(BaseModel):
     SEO_title: str

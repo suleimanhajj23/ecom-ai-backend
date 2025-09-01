@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON
 from sqlalchemy.sql import func
 from database import Base
+from datetime import datetime
 
 class User(Base):
     __tablename__ = "users"
@@ -10,7 +11,7 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     plan = Column(String, default="basic")  # basic, pro, premium
     monthly_generates = Column(Integer, default=0)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_reset = Column(DateTime, default=datetime.utcnow)
 
 class Generation(Base):
     __tablename__ = "generations"
