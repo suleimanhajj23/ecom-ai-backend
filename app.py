@@ -17,8 +17,7 @@ from auth import create_access_token
 # --- Setup ---
 Base.metadata.create_all(bind=engine)
 origins = [
-    "https://ecomaicopy.netlify.app",  # ✅ your Netlify frontend
-    "http://localhost:8000",           # optional local testing
+    "https://ecomaicopy.netlify.app"
 ]
 
 app = FastAPI(title="Ecom Copy AI", version="0.6.0")
