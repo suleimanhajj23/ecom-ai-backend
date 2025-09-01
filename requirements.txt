@@ -1,14 +1,24 @@
+# Web framework & ASGI
 fastapi>=0.111
 uvicorn[standard]>=0.30
-sqlalchemy>=2.0
-stripe>=10.0
-pydantic>=2.7
-python-dotenv>=1.0
-passlib[bcrypt]>=1.7
-openai>=1.0.0
 
-httpx>=0.27
+# Database
+sqlalchemy>=2.0
 alembic>=1.13
+psycopg2-binary>=2.9  # ✅ Postgres driver (binary package for Render)
+
+# Auth & Security
+passlib[bcrypt]>=1.7
 python-jose[cryptography]>=3.3
 email-validator>=2.0
-psycopg2-binary
+
+# APIs & HTTP
+httpx>=0.27
+python-dotenv>=1.0
+
+# AI & Payments
+openai>=1.0.0
+stripe>=10.0
+
+# Optional utilities
+pydantic>=2.7
